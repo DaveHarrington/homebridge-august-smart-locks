@@ -236,6 +236,14 @@ class AugustPlatform {
     var lockService = accessory.getService(self.Service.LockMechanism);
     var doorService = accessory.getService(self.Service.ContactSensor);
 
+    if (accessory.context.doorState == 1 && accessory.context.targetState == self.Characteristic.LockCurrentState.SECURED) {
+      self.platformLog(`Override locked state as jammed: ${accessory.context.targetState} - ${accessory.context.currentState}`);
+      accessory.context.currentState = self.Characteristic.LockCurrentState.JAMMED;
+    } else if (accessory.context.doorState == 1 && accessory.context.currentState == self.Characteristic.LockCurrentState.SECURED) {
+      self.platformLog(`Override locked state as open: ${accessory.context.targetState} - ${accessory.context.currentState}`);
+      accessory.context.currentState = self.Characteristic.LockCurrentState.UNSECURED;
+    }
+
     lockService.getCharacteristic(self.Characteristic.LockTargetState).updateValue(accessory.context.targetState);
     lockService.getCharacteristic(self.Characteristic.LockCurrentState).updateValue(accessory.context.currentState);
     doorService.getCharacteristic(self.Characteristic.ContactSensorState).updateValue(accessory.context.doorState);
@@ -301,7 +309,7 @@ class AugustPlatform {
 
     // Log in
     self.augustApi.authorize(authorizeRequest).then(
-      function () {
+      function (json) {
         self.getlocks(true, callback);
       },
       function (error) {
@@ -541,9 +549,22 @@ class AugustPlatform {
           token: self.token,
         });
 
+    // Do an update after 1 seconds to appease Siri
+    setTimeout(function() {
+      setImmediate(() => {
+        self.updatelockStates(accessory);
+      });
+      callback(null);
+    }, 100
+    );
+
     remoteOperate.then(
-      function () {
+      function (json) {
         lockCtx.log("State was successfully set to " + status);
+
+        if (json.token) {
+          self.token = json.token;
+        }
 
         // Set short polling interval
         if (self.tout) {
@@ -553,16 +574,13 @@ class AugustPlatform {
         self.count = 0;
         self.periodicUpdate();
         accessory.context.currentState = state;
-        callback(null);
         setImmediate(() => {
           self.updatelockStates(accessory);
         });
       },
       function (error) {
-        lockCtx.log("Error '" + error.message + "' setting lock state: " + status);
-        // self.removeAccessory(accessory);
+        self.platformLog("Error '" + error.message + "' setting lock state: " + status);
         self.token = null;  // Reset token in case it has expired
-        callback(error);
       },
     );
   }
