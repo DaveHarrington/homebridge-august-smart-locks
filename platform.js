@@ -41,6 +41,7 @@ class AugustPlatform {
     });
     
     this.authed = this.storage.getItemSync('authed') || false;
+    this.token = null // Session token
 
     this.augustApiConfig = {
       apiKey: config.securityToken || "7cab4bbd-2693-4fc1-b99b-dec0fb20f9d4", //pulled from android apk july 2020,
@@ -329,9 +330,12 @@ class AugustPlatform {
     self.augustApi
       .locks({
         config: self.augustApiConfig,
+        token: self.token,
       })
       .then(
         function (json) {
+          self.token = json.token;
+
           self.lockids = Object.keys(json);
           for (var i = 0; i < self.lockids.length; i++) {
             self.lock = json[self.lockids[i]];
@@ -360,6 +364,7 @@ class AugustPlatform {
         },
         function (error) {
           self.platformLog("Could not communicate with August API: " + error.message);
+          self.token = null;
           callback(error, null);
         },
       );
@@ -371,11 +376,13 @@ class AugustPlatform {
     var getLock = self.augustApi.status({
       lockID: lockId,
       config: self.augustApiConfig,
+      token: self.token,
     });
 
     var getDetails = self.augustApi.details({
       lockID: lockId,
       config: self.augustApiConfig,
+      token: self.token,
     });
 
     Promise.all([getLock, getDetails]).then(
@@ -476,13 +483,14 @@ class AugustPlatform {
           if (state === "locked") {
             newAccessory.context.initialState = self.Characteristic.LockCurrentState.UNSECURED;
             newState = self.Characteristic.LockCurrentState.SECURED;
-          } else if (state === "unlocked") {
+          } else {
             newAccessory.context.initialState = self.Characteristic.LockCurrentState.SECURED;
             newState = self.Characteristic.LockCurrentState.UNSECURED;
           }
 
           // Detect for state changes
           if (newState !== newAccessory.context.currentState) {
+            self.platformLog(`Detected state change: ${state} nextState: ${newState} prevState: ${newAccessory.context.currentState}`);
             isStateChanged = true;
             newAccessory.context.currentState = newState;
             newAccessory.context.targetState = newState;
@@ -504,6 +512,8 @@ class AugustPlatform {
         callback();
       },
       function (error) {
+        self.platformLog(`Error getting device state: ${error}`);
+        self.token = null;
         // self.platformLog(error);
         callback(error, null);
       },
@@ -514,6 +524,8 @@ class AugustPlatform {
   setState(accessory, state, callback) {
     var self = this;
     var lockCtx = accessory.context;
+    lockCtx.log(`Request to change lock state: ${state}`);
+
     accessory.context.targetState = state;
     var status = self.lockState[state];
     var remoteOperate =
@@ -521,10 +533,12 @@ class AugustPlatform {
         ? self.augustApi.lock({
           lockID: lockCtx.deviceID,
           config: self.augustApiConfig,
+          token: self.token,
         })
         : self.augustApi.unlock({
           lockID: lockCtx.deviceID,
           config: self.augustApiConfig,
+          token: self.token,
         });
 
     remoteOperate.then(
@@ -547,6 +561,7 @@ class AugustPlatform {
       function (error) {
         lockCtx.log("Error '" + error.message + "' setting lock state: " + status);
         // self.removeAccessory(accessory);
+        self.token = null;  // Reset token in case it has expired
         callback(error);
       },
     );
