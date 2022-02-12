@@ -32,14 +32,14 @@ class AugustPlatform {
     this.validData = false;
     this.codeRequested = false;
     this.hideLocks = this.config.hideLocks ? this.config.hideLocks.split(",") : [];
-    
+
     this.cacheDirectory = api.user.persistPath();
     this.storage = require('node-persist');
     this.storage.initSync({
-        dir: this.cacheDirectory,
-        forgiveParseErrors: true,
+      dir: this.cacheDirectory,
+      forgiveParseErrors: true,
     });
-    
+
     this.authed = this.storage.getItemSync('authed') || false;
     this.token = null // Session token
 
@@ -130,16 +130,16 @@ class AugustPlatform {
       .on("set", self.setState.bind(self, accessory));
 
 
-      var batteryService = accessory.getService(self.Service.BatteryService) 
+    var batteryService = accessory.getService(self.Service.BatteryService) 
     if(batteryService) {
-        batteryService
-          .getCharacteristic(self.Characteristic.BatteryLevel);
-        batteryService
-          .getCharacteristic(self.Characteristic.StatusLowBattery);
+      batteryService
+        .getCharacteristic(self.Characteristic.BatteryLevel);
+      batteryService
+        .getCharacteristic(self.Characteristic.StatusLowBattery);
 
-      } else {
-        accessory.addService(self.Service.BatteryService);
-      }
+    } else {
+      accessory.addService(self.Service.BatteryService);
+    }
 
     var service = accessory.getService(self.Service.ContactSensor);
 
@@ -247,13 +247,13 @@ class AugustPlatform {
     lockService.getCharacteristic(self.Characteristic.LockTargetState).updateValue(accessory.context.targetState);
     lockService.getCharacteristic(self.Characteristic.LockCurrentState).updateValue(accessory.context.currentState);
     doorService.getCharacteristic(self.Characteristic.ContactSensorState).updateValue(accessory.context.doorState);
-  
+
     var batteryService = accessory.getService(self.Service.BatteryService);
 
     if(batteryService) {
       batteryService
         .setCharacteristic(self.Characteristic.BatteryLevel, accessory.context.batt);
-        
+
       batteryService
         .setCharacteristic(self.Characteristic.StatusLowBattery, accessory.context.low);
     }  
@@ -415,16 +415,16 @@ class AugustPlatform {
         var thislockName = lockName;
         var state =
           lock.status == "kAugLockState_Locked"
-            ? "locked"
-            : lock.status == "kAugLockState_Unlocked"
-              ? "unlocked"
-              : "error";
+          ? "locked"
+          : lock.status == "kAugLockState_Unlocked"
+          ? "unlocked"
+          : "error";
         var doorState =
           lock.doorState == "kAugDoorState_Closed"
-            ? "closed"
-            : lock.doorState == "kAugDoorState_Open"
-              ? "open"
-              : "unknown";
+          ? "closed"
+          : lock.doorState == "kAugDoorState_Open"
+          ? "open"
+          : "unknown";
         var isDoorOpened = doorState == "open" ? 1 : 0;
         var thishome = houseName;
         var isStateChanged = false;
@@ -482,9 +482,12 @@ class AugustPlatform {
         }
 
 
-    if (self.batt) {
-      newAccessory.context.low = (self.batt > 20 || self.batt <= 0) ? self.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL : self.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW;
-    }
+        if (self.batt) {
+          newAccessory.context.low =
+            (self.batt > 20 || self.batt <= 0)
+            ? self.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL
+            : self.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW;
+        }
 
         if (state) {
           var newState;
@@ -538,16 +541,18 @@ class AugustPlatform {
     var status = self.lockState[state];
     var remoteOperate =
       state == self.Characteristic.LockTargetState.SECURED
-        ? self.augustApi.lock({
-          lockID: lockCtx.deviceID,
-          config: self.augustApiConfig,
-          token: self.token,
-        })
-        : self.augustApi.unlock({
-          lockID: lockCtx.deviceID,
-          config: self.augustApiConfig,
-          token: self.token,
-        });
+      ? self.augustApi.lock({
+        lockID: lockCtx.deviceID,
+        config: self.augustApiConfig,
+        token: self.token,
+        log: self.platformLog,
+      })
+      : self.augustApi.unlock({
+        lockID: lockCtx.deviceID,
+        config: self.augustApiConfig,
+        token: self.token,
+        log: self.platformLog,
+      });
 
     // Do an update after 1 seconds to appease Siri
     setTimeout(function() {
