@@ -173,6 +173,9 @@ class AugustPlatform {
 
   // Method to get current lock state
   getState(accessory, callback) {
+    var self = this;
+    self.count = 0;
+    self.periodicUpdate();
     // Get target state directly from cache
     callback(null, accessory.context.currentState);
   }
@@ -194,9 +197,24 @@ class AugustPlatform {
     var self = this;
 
     if (self.tout !== null) {
-      self.log.debug("Update already scheduled");
-      return;
+      self.platformLog("Override update");
+      clearTimeout(self.tout);
     }
+
+    self.updateState(function (error, skipped) {
+      if (!error) {
+        if (!skipped) {
+          // Update states for all HomeKit accessories
+          for (var deviceID in self.accessories) {
+            var accessory = self.accessories[deviceID];
+            self.updatelockStates(accessory);
+          }
+        }
+      } else {
+        // Re-login after short polling interval if error occurs
+        self.count = self.maxCount - 1;
+      }
+    });
 
     // Determine polling interval
     var refresh;
@@ -210,23 +228,9 @@ class AugustPlatform {
     // Setup periodic update with polling interval
     self.tout = setTimeout(function () {
       self.tout = null;
-      self.updateState(function (error, skipped) {
-        if (!error) {
-          if (!skipped) {
-            // Update states for all HomeKit accessories
-            for (var deviceID in self.accessories) {
-              var accessory = self.accessories[deviceID];
-              self.updatelockStates(accessory);
-            }
-            self.periodicUpdate();
-          }
-        } else {
-          // Re-login after short polling interval if error occurs
-          self.count = self.maxCount - 1;
-          self.periodicUpdate();
-        }
-      });
+      self.periodicUpdate();
     }, refresh * 1000);
+    // self.platformLog(`${refresh} seconds till next update`);
   }
 
   // Method to update lock state in HomeKit
