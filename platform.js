@@ -182,12 +182,20 @@ class AugustPlatform {
 
   // Method to get target lock state
   getTargetState(accessory, callback) {
+    var self = this;
+    if (!accessory.context.targetState) {
+      self.periodicUpdate();
+    }
     // Get target state directly from cache
     callback(null, accessory.context.targetState);
   }
 
   // Method to get target door state
   getDoorState(accessory, callback) {
+    var self = this;
+    if (!accessory.context.doorState) {
+      self.periodicUpdate();
+    }
     // Get target state directly from cache
     callback(null, accessory.context.doorState);
   }
@@ -197,7 +205,6 @@ class AugustPlatform {
     var self = this;
 
     if (self.tout !== null) {
-      self.platformLog("Override update");
       clearTimeout(self.tout);
     }
 
@@ -253,7 +260,6 @@ class AugustPlatform {
     doorService.getCharacteristic(self.Characteristic.ContactSensorState).updateValue(accessory.context.doorState);
 
     var batteryService = accessory.getService(self.Service.BatteryService);
-
     if(batteryService) {
       batteryService
         .setCharacteristic(self.Characteristic.BatteryLevel, accessory.context.batt);
@@ -272,7 +278,6 @@ class AugustPlatform {
       return;
     }
 
-    self.log.debug("updateState called");
     self.updating = true;
 
     // Refresh data directly from sever if current data is valid
@@ -346,7 +351,9 @@ class AugustPlatform {
       })
       .then(
         function (json) {
-          self.token = json.token;
+          if (json.token != self.token) {
+            self.token = json.token;
+          }
 
           self.lockids = Object.keys(json);
           for (var i = 0; i < self.lockids.length; i++) {
@@ -399,30 +406,28 @@ class AugustPlatform {
 
     Promise.all([getLock, getDetails]).then(
       function (values) {
+        self.token = values[1].token;
+
         var lock = values[0]
         var locks = lock.info;
-
-        self.batt = values[1].battery * 100;
-        var newbatt = self.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
-        if (self.batt > 0 && self.batt <= 20) {
-          newbatt = self.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW;
-        }
 
         if (!locks.bridgeID) {
           self.validData = true;
           return;
         }
 
+        // Parse response from August
         var thisDeviceID = locks.lockID.toString();
         var thisSerialNumber = locks.serialNumber.toString();
         var thisModel = locks.lockType.toString();
         var thislockName = lockName;
-        var state =
+        var lockState =
           lock.status == "kAugLockState_Locked"
-          ? "locked"
+          ? self.Characteristic.LockCurrentState.SECURED // 1
           : lock.status == "kAugLockState_Unlocked"
-          ? "unlocked"
-          : "error";
+          ? self.Characteristic.LockCurrentState.UNSECURED // 0
+          : self.Characteristic.LockCurrentState.UNSECURED; // Error, treat as unlocked
+
         var doorState =
           lock.doorState == "kAugDoorState_Closed"
           ? "closed"
@@ -431,60 +436,31 @@ class AugustPlatform {
           : "unknown";
         var isDoorOpened = doorState == "open" ? 1 : 0;
         var thishome = houseName;
-        var isStateChanged = false;
+
+        // Retrieve accessory from cache
         var newAccessory;
-
-        // Initialization for opener
-        if (!self.accessories[thisDeviceID]) {
-          var uuid = self.UUIDGen.generate(thisDeviceID);
-          var _Accessory = self.Accessory;
-          // Setup accessory as GARAGE_lock_OPENER (4) category.
-          newAccessory = new _Accessory("August " + thislockName, uuid, 6);
-
-          // New accessory found in the server is always reachable
-          newAccessory.reachable = true;
-
-          // Store and initialize variables into context
-          newAccessory.context.deviceID = thisDeviceID;
-          newAccessory.context.initialState = self.Characteristic.LockCurrentState.SECURED;
-          newAccessory.context.currentState = self.Characteristic.LockCurrentState.SECURED;
-          newAccessory.context.serialNumber = thisSerialNumber;
-          newAccessory.context.home = thishome;
-          newAccessory.context.model = thisModel;
-          newAccessory.context.doorState = isDoorOpened;
-          newAccessory.context.log = function (msg) {
-            self.log("[" + newAccessory.displayName + "]", msg);
-          };
-
-
-          newAccessory.context.batt = self.batt;
-          newAccessory.context.low = self.low;
-          // Setup HomeKit security systemLoc service
-          newAccessory.addService(self.Service.LockMechanism, thislockName);
-          newAccessory.addService(self.Service.ContactSensor, thislockName);
-          newAccessory.addService(self.Service.BatteryService, thislockName);
-          // Setup HomeKit accessory information
-          self.setAccessoryInfo(newAccessory);
-          // Setup listeners for different security system events
-          self.setService(newAccessory);
-          // Register accessory in HomeKit
-          newAccessory.context.log("Adding lock to homebridge");
-          self.api.registerPlatformAccessories(ModuleName, PlatformName, [newAccessory]);
+        var isStateChanged = false;
+        newAccessory = self.accessories[thisDeviceID];
+        if (!newAccessory) {
+          // Initialization for opener
+          newAccessory = self.initAccessory(thisDeviceID);
           isStateChanged = true;
-        } else {
-          // Retrieve accessory from cache
-          newAccessory = self.accessories[thisDeviceID];
-
-          // Update context
-          newAccessory.context.deviceID = thisDeviceID;
-          newAccessory.context.serialNumber = thisSerialNumber;
-          newAccessory.context.model = thisModel;
-          newAccessory.context.home = thishome;
-
-          // Accessory is reachable after it's found in the server
-          newAccessory.updateReachability(true);
         }
 
+        newAccessory.context.deviceID = thisDeviceID;
+        newAccessory.context.serialNumber = thisSerialNumber;
+        newAccessory.context.model = thisModel;
+        newAccessory.context.home = thishome;
+
+        // Accessory is reachable after it's found in the server
+        newAccessory.updateReachability(true);
+
+        // Battery
+        self.batt = values[1].battery * 100;
+        var newbatt = self.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
+        if (self.batt > 0 && self.batt <= 20) {
+          newbatt = self.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW;
+        }
 
         if (self.batt) {
           newAccessory.context.low =
@@ -493,28 +469,22 @@ class AugustPlatform {
             : self.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW;
         }
 
-        if (state) {
-          var newState;
-          if (state === "locked") {
-            newAccessory.context.initialState = self.Characteristic.LockCurrentState.UNSECURED;
-            newState = self.Characteristic.LockCurrentState.SECURED;
-          } else {
-            newAccessory.context.initialState = self.Characteristic.LockCurrentState.SECURED;
-            newState = self.Characteristic.LockCurrentState.UNSECURED;
-          }
-
-          // Detect for state changes
-          if (newState !== newAccessory.context.currentState) {
-            self.platformLog(`Detected state change: ${state} nextState: ${newState} prevState: ${newAccessory.context.currentState}`);
-            isStateChanged = true;
-            newAccessory.context.currentState = newState;
-            newAccessory.context.targetState = newState;
-          }
+        // Update if state change found
+        var prevLockState = newAccessory.context.currentState;
+        if (lockState != prevLockState) {
+          self.platformLog(`Lock changed: ${lockState} was: ${prevLockState}`);
+          // HomeKit will update the "Target State" to change the lock (see updateState)
+          // But August can also change it e.g. via the app or Autolock.
+          // Either way, if the lock state has changed, the target should now match
+          newAccessory.context.targetState = lockState;
+          newAccessory.context.currentState = lockState;
+          isStateChanged = true;
         }
 
         if (isDoorOpened != newAccessory.context.doorState) {
-          isStateChanged = true;
+          self.platformLog(`Door changed: ${isDoorOpened} was: ${newAccessory.context.doorState}`);
           newAccessory.context.doorState = isDoorOpened;
+          isStateChanged = true;
         }
 
         // Store accessory in cache
@@ -524,15 +494,47 @@ class AugustPlatform {
         if (isStateChanged) {
           self.count = 0;
         }
+
         callback();
       },
       function (error) {
         self.platformLog(`Error getting device state: ${error}`);
         self.token = null;
-        // self.platformLog(error);
         callback(error, null);
       },
     );
+  }
+
+  initAccessory(thisDeviceID) {
+    var self = this;
+
+    var uuid = self.UUIDGen.generate(thisDeviceID);
+    var _Accessory = self.Accessory;
+    // Setup accessory as GARAGE_lock_OPENER (4) category.
+    newAccessory = new _Accessory("August " + thislockName, uuid, 6);
+
+    // Store and initialize variables into context
+    newAccessory.context.initialState = self.Characteristic.LockCurrentState.SECURED;
+    newAccessory.context.currentState = self.Characteristic.LockCurrentState.SECURED;
+    // newAccessory.context.targetState = self.Characteristic.LockCurrentState.SECURED;
+    newAccessory.context.log = function (msg) {
+      self.log("[" + newAccessory.displayName + "]", msg);
+    };
+
+    newAccessory.context.batt = self.batt;
+    newAccessory.context.low = self.low;
+    // Setup HomeKit security systemLoc service
+    newAccessory.addService(self.Service.LockMechanism, thislockName);
+    newAccessory.addService(self.Service.ContactSensor, thislockName);
+    newAccessory.addService(self.Service.BatteryService, thislockName);
+    // Setup HomeKit accessory information
+    self.setAccessoryInfo(newAccessory);
+    // Setup listeners for different security system events
+    self.setService(newAccessory);
+    // Register accessory in HomeKit
+    newAccessory.context.log("Adding lock to homebridge");
+    self.api.registerPlatformAccessories(ModuleName, PlatformName, [newAccessory]);
+    return newAccessory;
   }
 
   // Send opener target state to the server
@@ -549,13 +551,11 @@ class AugustPlatform {
         lockID: lockCtx.deviceID,
         config: self.augustApiConfig,
         token: self.token,
-        log: self.platformLog,
       })
       : self.augustApi.unlock({
         lockID: lockCtx.deviceID,
         config: self.augustApiConfig,
         token: self.token,
-        log: self.platformLog,
       });
 
     // Do an update after 1 seconds to appease Siri
@@ -570,10 +570,7 @@ class AugustPlatform {
     remoteOperate.then(
       function (json) {
         lockCtx.log("State was successfully set to " + status);
-
-        if (json.token) {
-          self.token = json.token;
-        }
+        self.token = json.token;
 
         // Set short polling interval
         if (self.tout) {
