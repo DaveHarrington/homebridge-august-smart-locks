@@ -318,7 +318,7 @@ class AugustPlatform {
 
     // Log in
     self.augustApi.authorize(authorizeRequest).then(
-      function (json) {
+      function () {
         self.getlocks(true, callback);
       },
       function (error) {
